@@ -1,0 +1,143 @@
+version: "3.8"
+
+services:
+  mysql:
+    image: mysql:8.0
+    platform: linux/amd64
+    container_name: disk_inspection_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root123456
+      MYSQL_DATABASE: disk_inspection
+      MYSQL_USER: inspection
+      MYSQL_PASSWORD: inspection123
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./backend/scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    platform: linux/amd64
+    container_name: disk_inspection_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: disk_inspection_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=False
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_NAME=disk_inspection
+      - DB_USER=inspection
+      - DB_PASSWORD=inspection123
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - SECRET_KEY=django-insecure-disk-inspection-secret-key-2024
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - backend_logs:/app/logs
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: disk_inspection_celery_worker
+    restart: always
+    command: celery -A config worker -l info
+    environment:
+      - DEBUG=False
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_NAME=disk_inspection
+      - DB_USER=inspection
+      - DB_PASSWORD=inspection123
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - SECRET_KEY=django-insecure-disk-inspection-secret-key-2024
+    depends_on:
+      - backend
+      - redis
+
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: disk_inspection_celery_beat
+    restart: always
+    command: celery -A config beat -l info
+    environment:
+      - DEBUG=False
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_NAME=disk_inspection
+      - DB_USER=inspection
+      - DB_PASSWORD=inspection123
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - SECRET_KEY=django-insecure-disk-inspection-secret-key-2024
+    depends_on:
+      - backend
+      - redis
+
+  frontend-admin:
+    build:
+      context: ./frontend-admin
+      dockerfile: Dockerfile
+    container_name: disk_inspection_frontend
+    restart: always
+    ports:
+      - "8081:80"
+    depends_on:
+      - backend
+
+  # 测试用 SSH 服务器
+  test-server:
+    image: alpine:latest
+    container_name: disk_inspection_test_server
+    restart: always
+    ports:
+      - "2222:22"
+    command: >
+      sh -c "apk add --no-cache openssh &&
+             ssh-keygen -A &&
+             echo 'root:root123' | chpasswd &&
+             sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config &&
+             sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config &&
+             /usr/sbin/sshd -D"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "22"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mysql_data:
+  redis_data:
+  backend_logs:

@@ -1,0 +1,21 @@
+# Ignore HTML files
+*.html
+
+# Ignore build output
+dist/
+build/
+node_modules/
+
+# Ignore Python files
+*.py
+__pycache__/
+
+# Ignore logs
+*.log
+
+# Ignore environment files
+.env*
+
+# Ignore lock files
+package-lock.json
+yarn.lock
